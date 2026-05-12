@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const nodemailer = require('nodemailer');
+const ws = require('ws');
 
 const { SUPABASE_URL, SUPABASE_SERVICE_KEY, GMAIL_USER, GMAIL_APP_PASSWORD, REPORT_EMAIL_TO } = process.env;
 
@@ -12,10 +13,10 @@ function prettyDate(d) {
 }
 
 function buildHTML(entries, dateObj) {
-  const date = prettyDate(dateObj);
-  const followed = entries.filter(e => e.trip_status === 'followed').length;
-  const skipped = entries.filter(e => e.trip_status === 'skipped').length;
-  const pending = entries.filter(e => !e.monitor_status).length;
+  var date = prettyDate(dateObj);
+  var followed = entries.filter(function(e) { return e.trip_status === 'followed'; }).length;
+  var skipped = entries.filter(function(e) { return e.trip_status === 'skipped'; }).length;
+  var pending = entries.filter(function(e) { return !e.monitor_status; }).length;
 
   if (!entries.length) {
     return '<html><body style="font-family:Arial;padding:24px"><h2 style="color:#f0a500">Fleet Daily Report - ' + date + '</h2><p>No entries recorded today.</p></body></html>';
@@ -25,9 +26,9 @@ function buildHTML(entries, dateObj) {
     var stops = (e.skipped_stops || []).join(', ') || '-';
     var mColor = e.monitor_status === 'confirmed' ? '#16a34a' : e.monitor_status === 'flagged' ? '#dc2626' : '#999';
     var time = new Date(e.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    var status = e.trip_status === 'followed' ? 'Followed' : 'Skipped';
     var statusColor = e.trip_status === 'followed' ? '#16a34a' : '#dc2626';
-    return '<tr><td>' + (entries.length - i) + '</td><td style="font-weight:800;color:#92400e">' + e.truck_number + '</td><td>' + (e.driver_name || '-') + '</td><td style="color:' + statusColor + ';font-weight:700">' + status + '</td><td style="color:#b45309;font-weight:700">' + stops + '</td><td>' + (e.skip_reason || '-') + '</td><td style="color:' + mColor + ';font-weight:700">' + (e.monitor_status || 'Pending') + '</td><td>' + (e.monitor_notes || '-') + '</td><td style="color:#999">' + time + '</td></tr>';
+    var statusText = e.trip_status === 'followed' ? 'Followed' : 'Skipped';
+    return '<tr><td>' + (entries.length - i) + '</td><td style="font-weight:800;color:#92400e">' + e.truck_number + '</td><td>' + (e.driver_name || '-') + '</td><td style="color:' + statusColor + ';font-weight:700">' + statusText + '</td><td style="color:#b45309;font-weight:700">' + stops + '</td><td>' + (e.skip_reason || '-') + '</td><td style="color:' + mColor + ';font-weight:700">' + (e.monitor_status || 'Pending') + '</td><td>' + (e.monitor_notes || '-') + '</td><td style="color:#999">' + time + '</td></tr>';
   }).join('');
 
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial;padding:24px;color:#111;font-size:11px}.hdr{display:flex;justify-content:space-between;border-bottom:3px solid #f0a500;padding-bottom:12px;margin-bottom:16px}.logo{font-size:20px;font-weight:900;text-transform:uppercase}.stats{display:flex;gap:12px;margin-bottom:16px}.st{flex:1;border:1px solid #e0e0e0;border-radius:6px;padding:8px 12px;text-align:center;background:#fafafa}.st b{display:block;font-size:20px;font-weight:900}table{width:100%;border-collapse:collapse;font-size:11px}th{background:#1c2030;color:#fff;font-size:9px;padding:7px 9px;text-align:left;text-transform:uppercase}td{padding:7px 9px;border-bottom:1px solid #eee}</style></head><body><div class="hdr"><div class="logo">Fleet Daily Report</div><div style="font-size:10px;color:#777">' + date + '</div></div><div class="stats"><div class="st"><b>' + entries.length + '</b>Total</div><div class="st"><b style="color:#16a34a">' + followed + '</b>Followed</div><div class="st"><b style="color:#dc2626">' + skipped + '</b>Skipped</div><div class="st"><b style="color:#999">' + pending + '</b>Pending</div></div><table><thead><tr><th>#</th><th>Truck</th><th>Driver</th><th>Status</th><th>Skipped Stops</th><th>Reason</th><th>Monitor</th><th>Notes</th><th>Time</th></tr></thead><tbody>' + rows + '</tbody></table></body></html>';
@@ -38,7 +39,9 @@ async function main() {
   var today = todayStr();
   console.log('Date:', today);
 
-  var db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  var db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+    global: { WebSocket: ws }
+  });
 
   var result = await db.from('fleet_entries').select('*').eq('report_date', today).order('created_at', { ascending: false });
 
