@@ -1,6 +1,5 @@
-const { createClient } = require('@supabase/supabase-js');
+const https = require('https');
 const nodemailer = require('nodemailer');
-const ws = require('ws');
 
 const { SUPABASE_URL, SUPABASE_SERVICE_KEY, GMAIL_USER, GMAIL_APP_PASSWORD, REPORT_EMAIL_TO } = process.env;
 
@@ -10,6 +9,37 @@ function todayStr() {
 
 function prettyDate(d) {
   return d.toLocaleDateString('en-GB', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+}
+
+function supabaseRequest(method, path, body) {
+  return new Promise(function(resolve, reject) {
+    var url = new URL(SUPABASE_URL + '/rest/v1/' + path);
+    var data = body ? JSON.stringify(body) : null;
+    var options = {
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method: method,
+      headers: {
+        'apikey': SUPABASE_SERVICE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      }
+    };
+    if (data) options.headers['Content-Length'] = Buffer.byteLength(data);
+
+    var req = https.request(options, function(res) {
+      var body = '';
+      res.on('data', function(chunk) { body += chunk; });
+      res.on('end', function() {
+        try { resolve(JSON.parse(body || '[]')); }
+        catch(e) { resolve([]); }
+      });
+    });
+    req.on('error', reject);
+    if (data) req.write(data);
+    req.end();
+  });
 }
 
 function buildHTML(entries, dateObj) {
@@ -30,7 +60,8 @@ function buildHTML(entries, dateObj) {
     var time = new Date(e.created_at).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
     var sColor = e.trip_status==='followed' ? '#16a34a' : '#dc2626';
     var sText  = e.trip_status==='followed' ? 'Followed' : 'Skipped';
-    rows += '<tr><td>' + (entries.length-i) + '</td>';
+    rows += '<tr>';
+    rows += '<td>' + (entries.length-i) + '</td>';
     rows += '<td style="font-weight:800;color:#92400e">' + e.truck_number + '</td>';
     rows += '<td>' + (e.driver_name||'-') + '</td>';
     rows += '<td style="color:' + sColor + ';font-weight:700">' + sText + '</td>';
@@ -38,7 +69,8 @@ function buildHTML(entries, dateObj) {
     rows += '<td>' + (e.skip_reason||'-') + '</td>';
     rows += '<td style="color:' + mColor + ';font-weight:700">' + (e.monitor_status||'Pending') + '</td>';
     rows += '<td>' + (e.monitor_notes||'-') + '</td>';
-    rows += '<td style="color:#999">' + time + '</td></tr>';
+    rows += '<td style="color:#999">' + time + '</td>';
+    rows += '</tr>';
   }
 
   var css = 'body{font-family:Arial;padding:24px;color:#111;font-size:11px}';
@@ -73,22 +105,14 @@ async function main() {
   var today = todayStr();
   console.log('Date:', today);
 
-  var db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-    global: { WebSocket: ws }
-  });
+  // Fetch entries using plain HTTPS — no Supabase client needed
+  var entries = await supabaseRequest('GET',
+    'fleet_entries?report_date=eq.' + today + '&order=created_at.desc', null);
 
-  var result = await db
-    .from('fleet_entries')
-    .select('*')
-    .eq('report_date', today)
-    .order('created_at', { ascending: false });
-
-  if (result.error) {
-    console.error('Fetch failed:', result.error.message);
+  if (!Array.isArray(entries)) {
+    console.error('Fetch failed:', JSON.stringify(entries));
     process.exit(1);
   }
-
-  var entries = result.data;
   console.log('Fetched', entries.length, 'entries');
 
   var html = buildHTML(entries, new Date());
@@ -115,11 +139,8 @@ async function main() {
   console.log('Email sent to', REPORT_EMAIL_TO);
 
   if (entries.length > 0) {
-    var del = await db.from('fleet_entries').delete().eq('report_date', today);
-    if (del.error) {
-      console.error('Delete failed:', del.error.message);
-      process.exit(1);
-    }
+    await supabaseRequest('DELETE',
+      'fleet_entries?report_date=eq.' + today, null);
     console.log('Deleted', entries.length, 'entries');
   }
 
