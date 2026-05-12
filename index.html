@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Fleet Daily Report</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Supabase JS client -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg: #0d0f14;
+  --surface: #151820;
+  --surface2: #1c2030;
+  --border: #252a3a;
+  --accent: #f0a500;
+  --green: #22c55e;
+  --red: #ef4444;
+  --amber: #f59e0b;
+  --text: #e8eaf0;
+  --muted: #6b7280;
+  --r: 8px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Barlow', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  background: var(--surface);
+  border-bottom: 2px solid var(--accent);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.logo { display: flex; align-items: center; gap: 10px; }
+.logo-icon { font-size: 22px; }
+.logo-text {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 800; font-size: 18px;
+  letter-spacing: 1px; text-transform: uppercase;
+}
+.logo-text span { color: var(--accent); }
+
+.header-right { display: flex; align-items: center; gap: 10px; }
+
+.date-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 600; font-size: 10px;
+  color: var(--muted); letter-spacing: 1px;
+  text-transform: uppercase; text-align: right;
+}
+
+/* Connection dot */
+.conn-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+  transition: background .3s;
+}
+.conn-dot.online  { background: var(--green); }
+.conn-dot.offline { background: var(--red); }
+.conn-dot.loading { background: var(--amber); animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* Tab bar */
+.tab-bar {
+  display: flex;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  position: sticky;
+  top: 52px;
+  z-index: 40;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 13px 8px;
+  border: none; background: none;
+  color: var(--muted);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700; font-size: 13px;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all .2s;
+}
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.tab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #000;
+  border-radius: 10px; font-size: 10px; font-weight: 800;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  margin-left: 5px; vertical-align: middle;
+}
+
+.panel { display: none; flex-direction: column; }
+.panel.active { display: flex; }
+
+/* FORM */
+.form-body { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+.field label {
+  display: block; font-size: 10px; font-weight: 700;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 7px;
+}
+
+input[type="text"], textarea {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text);
+  font-family: 'Barlow', sans-serif;
+  font-size: 15px; padding: 12px 13px;
+  outline: none; transition: border-color .2s;
+  -webkit-appearance: none;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+textarea { resize: none; height: 80px; font-size: 14px; }
+
+.status-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.status-btn {
+  padding: 14px 8px;
+  border: 2px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface2);
+  color: var(--muted);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700; font-size: 14px;
+  letter-spacing: 1px; text-transform: uppercase;
+  cursor: pointer; transition: all .2s; text-align: center;
+}
+.status-btn.active-followed { border-color: var(--green); background: rgba(34,197,94,.12); color: var(--green); }
+.status-btn.active-skipped  { border-color: var(--red);   background: rgba(239,68,68,.12);  color: var(--red);   }
+
+.skipped-box {
+  background: rgba(239,68,68,.05);
+  border: 1px solid rgba(239,68,68,.2);
+  border-radius: var(--r);
+  padding: 14px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.skipped-box label {
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--muted); display: block; margin-bottom: 7px;
+}
+
+.stops-row { display: flex; gap: 8px; }
+.stops-row input { flex: 1; }
+
+.btn-sm {
+  padding: 12px 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--amber);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700; font-size: 14px;
+  cursor: pointer; white-space: nowrap;
+  transition: border-color .2s;
+}
+.btn-sm:hover { border-color: var(--amber); }
+
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag {
+  background: rgba(245,158,11,.1);
+  border: 1px solid rgba(245,158,11,.3);
+  border-radius: 4px; padding: 4px 10px;
+  font-size: 12px; font-weight: 700; color: var(--amber);
+  display: flex; align-items: center; gap: 5px;
+}
+.tag button { background:none; border:none; color:var(--muted); cursor:pointer; font-size:15px; line-height:1; padding:0; }
+
+.btn-add {
+  width: 100%; padding: 15px;
+  background: var(--accent); color: #000;
+  border: none; border-radius: var(--r);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 800; font-size: 16px;
+  letter-spacing: 2px; text-transform: uppercase;
+  cursor: pointer; transition: transform .1s, opacity .2s;
+}
+.btn-add:active { transform: scale(.98); }
+.btn-add:disabled { opacity: .5; cursor: not-allowed; }
+
+/* REPORT */
+.report-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+
+.stats-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
+.stat-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 10px 6px; text-align: center;
+}
+.stat-num { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 26px; line-height: 1; }
+.stat-label { font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-top: 3px; }
+
+.export-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn-export {
+  padding: 12px; border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700; font-size: 14px;
+  letter-spacing: 1px; text-transform: uppercase;
+  cursor: pointer; display: flex; align-items: center;
+  justify-content: center; gap: 6px; transition: all .2s;
+}
+.btn-export.pdf  { border-color: rgba(239,68,68,.4); color: var(--red); }
+.btn-export.xlsx { border-color: rgba(34,197,94,.4); color: var(--green); }
+
+/* Entry card */
+.entry-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; margin-bottom: 10px; }
+.card-top { padding: 12px 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.truck-label { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 22px; color: var(--accent); }
+.card-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.pill { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; padding: 3px 9px; border-radius: 20px; }
+.pill-followed { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.3); }
+.pill-skipped  { background: rgba(239,68,68,.15);  color: var(--red);   border: 1px solid rgba(239,68,68,.3); }
+
+.btn-del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 18px; padding: 2px 5px; border-radius: 4px; line-height: 1; }
+.btn-del:hover { color: var(--red); }
+
+.card-meta { padding: 0 14px 11px; display: flex; flex-wrap: wrap; gap: 7px; font-size: 12px; color: var(--muted); }
+
+.card-monitor { border-top: 1px solid var(--border); padding: 11px 14px; display: flex; flex-direction: column; gap: 8px; }
+.monitor-lbl { font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+.monitor-btns { display: flex; gap: 6px; }
+.mt-btn {
+  flex: 1; padding: 9px; border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg); color: var(--muted);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700; font-size: 12px;
+  letter-spacing: 1px; text-transform: uppercase;
+  cursor: pointer; transition: all .15s;
+}
+.mt-btn.confirmed { border-color: var(--green); background: rgba(34,197,94,.1); color: var(--green); }
+.mt-btn.flagged   { border-color: var(--red);   background: rgba(239,68,68,.1); color: var(--red); }
+
+.monitor-note {
+  width: 100%; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font-family: 'Barlow', sans-serif;
+  font-size: 13px; padding: 9px 10px; outline: none;
+  transition: border-color .2s; -webkit-appearance: none;
+}
+.monitor-note:focus { border-color: var(--accent); }
+
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 50px 20px; gap: 10px; color: var(--muted); }
+.empty-state .icon { font-size: 42px; opacity: .35; }
+.empty-state p { font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; opacity: .4; }
+
+/* Loading overlay */
+.loading-bar {
+  height: 3px; background: linear-gradient(90deg, var(--accent), var(--amber));
+  position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+  transform: scaleX(0); transform-origin: left;
+  transition: transform .3s; display: none;
+}
+.loading-bar.show { display: block; transform: scaleX(1); }
+
+.toast {
+  position: fixed; bottom: 18px; left: 50%;
+  transform: translateX(-50%) translateY(70px);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r);
+  padding: 11px 20px; font-size: 13px; font-weight: 500;
+  z-index: 999; white-space: nowrap; opacity: 0;
+  transition: all .3s; max-width: 90vw; text-align: center;
+}
+.toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+.toast.error { border-left-color: var(--red); }
+
+/* Config panel */
+.config-notice {
+  margin: 16px; padding: 14px;
+  background: rgba(240,165,0,.08);
+  border: 1px solid rgba(240,165,0,.3);
+  border-radius: var(--r);
+  font-size: 13px; line-height: 1.6; color: var(--muted);
+}
+.config-notice strong { color: var(--accent); display: block; margin-bottom: 6px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+
+@media (min-width: 860px) {
+  .tab-bar { display: none !important; }
+  body { overflow: auto; }
+  .desktop-row { display: flex; flex: 1; }
+  .panel { display: flex !important; }
+  #panelForm { width: 380px; flex-shrink: 0; border-right: 1px solid var(--border); min-height: calc(100vh - 52px); overflow-y: auto; }
+  #panelReport { flex: 1; overflow-y: auto; min-height: calc(100vh - 52px); }
+}
+@media (max-width: 859px) { .desktop-row { display: contents; } }
+</style>
+</head>
+<body>
+
+<div class="loading-bar" id="loadingBar"></div>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🚛</div>
+    <div class="logo-text">Fleet <span>Daily</span> Report</div>
+  </div>
+  <div class="header-right">
+    <div class="conn-dot loading" id="connDot" title="Connecting..."></div>
+    <div class="date-badge" id="headerDate"></div>
+  </div>
+</header>
+
+<div class="tab-bar">
+  <button class="tab-btn active" id="tabForm"   onclick="switchTab('form')">➕ Add Entry</button>
+  <button class="tab-btn"        id="tabReport" onclick="switchTab('report')">
+    📋 Report <span class="tab-badge" id="tabBadge">0</span>
+  </button>
+</div>
+
+<div class="desktop-row">
+
+  <!-- FORM PANEL -->
+  <div class="panel active" id="panelForm">
+    <div class="form-body">
+
+      <div class="field">
+        <label>Truck Number</label>
+        <input type="text" id="truckNum" placeholder="e.g. 1 873" autocomplete="off"/>
+      </div>
+
+      <div class="field">
+        <label>Driver Name <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+        <input type="text" id="driverName" placeholder="Driver name" autocomplete="off"/>
+      </div>
+
+      <div class="field">
+        <label>Trip Status</label>
+        <div class="status-group">
+          <button class="status-btn" id="btnFollowed" onclick="setStatus('followed')">✓ Followed</button>
+          <button class="status-btn" id="btnSkipped"  onclick="setStatus('skipped')">✗ Skipped Stops</button>
+        </div>
+      </div>
+
+      <div class="skipped-box" id="skippedBox" style="display:none">
+        <div>
+          <label>Skipped Stop Numbers</label>
+          <div class="stops-row">
+            <input type="text" id="stopInput" placeholder="#12 or 34" autocomplete="off"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();addStop()}"/>
+            <button class="btn-sm" onclick="addStop()">+ Add</button>
+          </div>
+          <div class="tag-list" id="tagList" style="margin-top:8px"></div>
+        </div>
+        <div>
+          <label>Reason for Skipping</label>
+          <textarea id="skipReason" placeholder="Why were stops skipped?"></textarea>
+        </div>
+      </div>
+
+      <button class="btn-add" id="btnSubmit" onclick="addEntry()">＋ Add to Report</button>
+
+    </div>
+  </div>
+
+  <!-- REPORT PANEL -->
+  <div class="panel" id="panelReport">
+    <div class="report-body">
+
+      <div class="stats-row">
+        <div class="stat-box"><div class="stat-num" id="sTotal"    style="color:var(--text)">0</div><div class="stat-label">Trucks</div></div>
+        <div class="stat-box"><div class="stat-num" id="sFollowed" style="color:var(--green)">0</div><div class="stat-label">Followed</div></div>
+        <div class="stat-box"><div class="stat-num" id="sSkipped"  style="color:var(--red)">0</div><div class="stat-label">Skipped</div></div>
+        <div class="stat-box"><div class="stat-num" id="sPending"  style="color:var(--muted)">0</div><div class="stat-label">Pending</div></div>
+      </div>
+
+      <div class="export-row">
+        <button class="btn-export pdf"  onclick="exportPDF()">🖨 PDF</button>
+        <button class="btn-export xlsx" onclick="exportExcel()">📊 Excel</button>
+      </div>
+
+      <div id="entriesContainer">
+        <div class="empty-state"><div class="icon">📋</div><p>Loading...</p></div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─────────────────────────────────────────────
+//  CONFIGURATION — fill these in after setup
+// ─────────────────────────────────────────────
+const SUPABASE_URL    = 'https://ajghsxrishdvspidwwce.supabase.co';       // e.g. https://xyzxyz.supabase.co
+const SUPABASE_ANON   = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFqZ2hzeHJpc2hkdnNwaWR3d2NlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg1Mzg2NTIsImV4cCI6MjA5NDExNDY1Mn0.1Jsx10OoFlb3lVK9JLLFP9Gorbg1srOZjID9B5hMXfU';  // public anon key from Supabase dashboard
+
+// ─────────────────────────────────────────────
+const CONFIG_READY = SUPABASE_URL !== 'https://ajghsxrishdvspidwwce.supabase.co';
+
+let supabase_client = null;
+let entries = [];
+let currentStatus = null;
+let currentStops  = [];
+
+document.getElementById('headerDate').textContent =
+  new Date().toLocaleDateString('en-GB', {weekday:'short', year:'numeric', month:'short', day:'numeric'}).toUpperCase();
+
+// ── INIT ──
+async function init() {
+  if (!CONFIG_READY) {
+    setConn('offline');
+    document.getElementById('entriesContainer').innerHTML = `
+      <div class="config-notice">
+        <strong>⚙️ Setup Required</strong>
+        Open <code>index.html</code>, find the CONFIG section at the top of the script,
+        and fill in your <strong>SUPABASE_URL</strong> and <strong>SUPABASE_ANON</strong> key.
+        See <code>SETUP.md</code> for step-by-step instructions.
+      </div>`;
+    return;
+  }
+
+  try {
+    supabase_client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+    setConn('loading');
+    await loadEntries();
+    setConn('online');
+
+    // Realtime: refresh when another device adds an entry
+    supabase_client
+      .channel('entries-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fleet_entries' }, () => loadEntries())
+      .subscribe();
+  } catch(err) {
+    setConn('offline');
+    toast('Cannot connect to database', true);
+  }
+}
+
+function setConn(state) {
+  const dot = document.getElementById('connDot');
+  dot.className = 'conn-dot ' + state;
+  dot.title = state === 'online' ? 'Connected' : state === 'loading' ? 'Connecting...' : 'Offline';
+}
+
+// ── LOAD ──
+async function loadEntries() {
+  setLoading(true);
+  const today = todayStr();
+  const { data, error } = await supabase_client
+    .from('fleet_entries')
+    .select('*')
+    .eq('report_date', today)
+    .order('created_at', { ascending: false });
+
+  setLoading(false);
+  if (error) { toast('Failed to load entries', true); return; }
+  entries = (data || []).map(row => ({
+    id:            row.id,
+    truck:         row.truck_number,
+    driver:        row.driver_name || '',
+    status:        row.trip_status,
+    skippedStops:  row.skipped_stops || [],
+    reason:        row.skip_reason   || '',
+    monitorStatus: row.monitor_status || null,
+    monitorNotes:  row.monitor_notes  || '',
+    time:          new Date(row.created_at).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}),
+    report_date:   row.report_date
+  }));
+  render();
+}
+
+// ── ADD ──
+async function addEntry() {
+  const truck = document.getElementById('truckNum').value.trim();
+  if (!truck)         { toast('Enter a truck number'); return; }
+  if (!currentStatus) { toast('Select trip status');   return; }
+  if (!CONFIG_READY)  { toast('Database not configured yet', true); return; }
+
+  setBtnLoading(true);
+  const { error } = await supabase_client.from('fleet_entries').insert({
+    truck_number:  truck,
+    driver_name:   document.getElementById('driverName').value.trim() || null,
+    trip_status:   currentStatus,
+    skipped_stops: currentStatus === 'skipped' ? [...currentStops] : [],
+    skip_reason:   currentStatus === 'skipped' ? document.getElementById('skipReason').value.trim() : null,
+    monitor_status: null,
+    monitor_notes:  null,
+    report_date:   todayStr()
+  });
+
+  setBtnLoading(false);
+  if (error) { toast('Failed to save entry', true); return; }
+
+  resetForm();
+  toast('Truck ' + truck + ' added ✓');
+  if (window.innerWidth < 860) switchTab('report');
+  // loadEntries will be triggered by realtime, but also call directly
+  await loadEntries();
+}
+
+// ── DELETE ──
+async function deleteEntry(id) {
+  const { error } = await supabase_client.from('fleet_entries').delete().eq('id', id);
+  if (error) { toast('Failed to delete', true); return; }
+  await loadEntries();
+}
+
+// ── MONITOR ──
+async function setMonitor(id, val) {
+  const e = entries.find(x => x.id === id);
+  if (!e) return;
+  const newVal = e.monitorStatus === val ? null : val;
+  const { error } = await supabase_client.from('fleet_entries')
+    .update({ monitor_status: newVal })
+    .eq('id', id);
+  if (!error) await loadEntries();
+}
+
+async function updateNote(id, val) {
+  await supabase_client.from('fleet_entries')
+    .update({ monitor_notes: val })
+    .eq('id', id);
+}
+
+// ── RENDER ──
+function render() {
+  const followed = entries.filter(e => e.status === 'followed').length;
+  const skipped  = entries.filter(e => e.status === 'skipped').length;
+  const pending  = entries.filter(e => !e.monitorStatus).length;
+
+  document.getElementById('sTotal').textContent    = entries.length;
+  document.getElementById('sFollowed').textContent = followed;
+  document.getElementById('sSkipped').textContent  = skipped;
+  document.getElementById('sPending').textContent  = pending;
+  document.getElementById('tabBadge').textContent  = entries.length;
+
+  const container = document.getElementById('entriesContainer');
+  if (!entries.length) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">📋</div><p>No entries yet</p></div>`;
+    return;
+  }
+
+  container.innerHTML = entries.map((e, i) => {
+    const num = entries.length - i;
+    const stops = (e.skippedStops || []);
+    return `
+      <div class="entry-card">
+        <div class="card-top">
+          <div>
+            <div style="font-size:9px;color:var(--muted);font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Entry #${num}</div>
+            <div class="truck-label">🚛 ${e.truck}</div>
+            ${e.driver ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">👤 ${e.driver}</div>` : ''}
+          </div>
+          <div class="card-right">
+            <span class="pill ${e.status === 'followed' ? 'pill-followed' : 'pill-skipped'}">
+              ${e.status === 'followed' ? '✓ Followed' : '✗ Skipped'}
+            </span>
+            <button class="btn-del" onclick="deleteEntry(${e.id})">✕</button>
+          </div>
+        </div>
+        <div class="card-meta">
+          <span>🕐 ${e.time}</span>
+        </div>
+        ${stops.length ? `
+          <div style="padding:0 14px 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center">
+            <span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-right:4px">Skipped:</span>
+            ${stops.map(s=>`<span style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);border-radius:4px;padding:2px 8px;font-size:12px;font-weight:700;color:#f59e0b">${s}</span>`).join('')}
+          </div>` : ''}
+        ${e.reason ? `<div style="padding:0 14px 10px;font-size:12px;color:var(--muted);font-style:italic">📝 "${e.reason}"</div>` : ''}
+        <div class="card-monitor">
+          <div class="monitor-lbl">Monitor Review</div>
+          <div class="monitor-btns">
+            <button class="mt-btn ${e.monitorStatus==='confirmed'?'confirmed':''}" onclick="setMonitor(${e.id},'confirmed')">✓ Confirmed OK</button>
+            <button class="mt-btn ${e.monitorStatus==='flagged'?'flagged':''}"    onclick="setMonitor(${e.id},'flagged')">⚑ Flagged</button>
+          </div>
+          <input class="monitor-note" type="text"
+            value="${(e.monitorNotes||'').replace(/"/g,'&quot;')}"
+            placeholder="Add monitor note..."
+            onchange="updateNote(${e.id}, this.value)"
+          />
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── FORM HELPERS ──
+function switchTab(t) {
+  document.getElementById('panelForm').classList.toggle('active',   t==='form');
+  document.getElementById('panelReport').classList.toggle('active', t==='report');
+  document.getElementById('tabForm').classList.toggle('active',   t==='form');
+  document.getElementById('tabReport').classList.toggle('active', t==='report');
+}
+
+function setStatus(s) {
+  currentStatus = s;
+  document.getElementById('btnFollowed').className = 'status-btn' + (s==='followed'?' active-followed':'');
+  document.getElementById('btnSkipped').className  = 'status-btn' + (s==='skipped' ?' active-skipped' :'');
+  document.getElementById('skippedBox').style.display = s==='skipped' ? 'flex' : 'none';
+  if (s==='followed') { currentStops=[]; renderTags(); }
+}
+
+function addStop() {
+  let v = document.getElementById('stopInput').value.trim().replace(/^#/,'');
+  if (!v) return;
+  const lbl = '#'+v;
+  if (!currentStops.includes(lbl)) { currentStops.push(lbl); renderTags(); }
+  document.getElementById('stopInput').value='';
+  document.getElementById('stopInput').focus();
+}
+
+function removeStop(s) { currentStops=currentStops.filter(x=>x!==s); renderTags(); }
+
+function renderTags() {
+  document.getElementById('tagList').innerHTML = currentStops.map(s=>
+    `<span class="tag">${s}<button onclick="removeStop('${s}')">×</button></span>`
+  ).join('');
+}
+
+function resetForm() {
+  ['truckNum','driverName','skipReason','stopInput'].forEach(id=>document.getElementById(id).value='');
+  currentStatus=null; currentStops=[];
+  renderTags();
+  document.getElementById('btnFollowed').className='status-btn';
+  document.getElementById('btnSkipped').className='status-btn';
+  document.getElementById('skippedBox').style.display='none';
+}
+
+function setBtnLoading(on) {
+  const btn = document.getElementById('btnSubmit');
+  btn.disabled = on;
+  btn.textContent = on ? 'Saving...' : '＋ Add to Report';
+}
+
+function setLoading(on) {
+  document.getElementById('loadingBar').classList.toggle('show', on);
+}
+
+function todayStr() {
+  return new Date().toISOString().slice(0,10); // YYYY-MM-DD
+}
+
+// ── TOAST ──
+let toastTimer;
+function toast(msg, isError=false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.classList.remove('show'), 2800);
+}
+
+// ── EXCEL ──
+function exportExcel() {
+  if (!entries.length) { toast('No entries to export'); return; }
+  const date = new Date().toLocaleDateString('en-GB');
+  const rows = entries.map((e,i)=>({
+    '#': entries.length-i,
+    'Truck Number':   e.truck,
+    'Driver Name':    e.driver||'',
+    'Trip Status':    e.status==='followed'?'Followed':'Skipped Stops',
+    'Skipped Stops':  (e.skippedStops||[]).join(', '),
+    'Driver Reason':  e.reason,
+    'Monitor Status': e.monitorStatus||'Pending',
+    'Monitor Notes':  e.monitorNotes,
+    'Time':           e.time,
+    'Date':           date
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:4},{wch:14},{wch:20},{wch:16},{wch:20},{wch:30},{wch:16},{wch:30},{wch:8},{wch:12}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Daily Report');
+  XLSX.writeFile(wb, `fleet_${date.replace(/\//g,'-')}.xlsx`);
+  toast('Excel downloaded!');
+}
+
+// ── PDF ──
+function exportPDF() {
+  if (!entries.length) { toast('No entries to export'); return; }
+  const html = buildReportHTML(entries, new Date());
+  const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href=url; a.download=`fleet_report_${todayStr()}.html`;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast('📥 Open the file and Print → Save as PDF');
+}
+
+// Shared report HTML builder (also used by GitHub Actions email script)
+function buildReportHTML(data, dateObj) {
+  const date     = dateObj.toLocaleDateString('en-GB', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  const followed = data.filter(e=>e.status==='followed').length;
+  const skipped  = data.filter(e=>e.status==='skipped').length;
+  const pending  = data.filter(e=>!e.monitorStatus).length;
+
+  const rows = data.map((e,i)=>{
+    const stops = (e.skippedStops||[]).join(', ')||'—';
+    const mColor = e.monitorStatus==='confirmed'?'#16a34a':e.monitorStatus==='flagged'?'#dc2626':'#999';
+    return `<tr>
+      <td>${data.length-i}</td>
+      <td style="font-weight:800;font-size:14px;color:#92400e">${e.truck}</td>
+      <td>${e.driver||'—'}</td>
+      <td style="color:${e.status==='followed'?'#16a34a':'#dc2626'};font-weight:700">${e.status==='followed'?'✓ Followed':'✗ Skipped'}</td>
+      <td style="color:#b45309;font-weight:700">${stops}</td>
+      <td style="color:#444">${e.reason||'—'}</td>
+      <td style="color:${mColor};font-weight:700">${e.monitorStatus||'Pending'}</td>
+      <td style="color:#444">${e.monitorNotes||'—'}</td>
+      <td style="color:#999">${e.time||''}</td>
+    </tr>`;
+  }).join('');
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111;font-size:11px;background:#fff}
+  .hdr{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #f0a500;padding-bottom:12px;margin-bottom:16px}
+  .logo{font-size:20px;font-weight:900;text-transform:uppercase;letter-spacing:1px}
+  .logo span{color:#f0a500}
+  .stats{display:flex;gap:12px;margin-bottom:16px}
+  .st{flex:1;border:1px solid #e0e0e0;border-radius:6px;padding:8px 12px;text-align:center;background:#fafafa}
+  .st b{display:block;font-size:20px;font-weight:900}
+  .st s{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#888;font-style:normal;display:block;margin-top:2px}
+  table{width:100%;border-collapse:collapse;font-size:11px}
+  th{background:#1c2030;color:#fff;text-transform:uppercase;font-size:9px;letter-spacing:1px;padding:7px 9px;text-align:left;font-weight:700}
+  td{padding:7px 9px;border-bottom:1px solid #eee;vertical-align:top}
+  tr:nth-child(even) td{background:#f9f9f9}
+  @media print{body{padding:8mm}@page{size:A4 landscape;margin:6mm}.no-print{display:none}}
+</style>
+</head><body>
+<div class="hdr">
+  <div class="logo">🚛 Fleet <span>Daily</span> Report</div>
+  <div style="font-size:10px;color:#777;text-align:right">${date}</div>
+</div>
+<div class="stats">
+  <div class="st"><b>${data.length}</b><s>Total Trucks</s></div>
+  <div class="st"><b style="color:#16a34a">${followed}</b><s>Followed</s></div>
+  <div class="st"><b style="color:#dc2626">${skipped}</b><s>Skipped</s></div>
+  <div class="st"><b style="color:#999">${pending}</b><s>Pending Review</s></div>
+</div>
+<table>
+  <thead><tr><th>#</th><th>Truck</th><th>Driver</th><th>Status</th><th>Skipped Stops</th><th>Driver Reason</th><th>Monitor</th><th>Notes</th><th>Time</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<div class="no-print" style="margin-top:20px;text-align:center">
+  <button onclick="window.print()" style="padding:10px 24px;background:#1c2030;color:white;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">
+    🖨 PRINT / SAVE AS PDF
+  </button>
+</div>
+</body></html>`;
+}
+
+init();
+</script>
+</body>
+</html>
