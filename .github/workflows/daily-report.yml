@@ -19,7 +19,7 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
-        run: npm install @supabase/supabase-js nodemailer ws
+        run: npm install nodemailer
 
       - name: Fetch, email, and clear report
         env:
